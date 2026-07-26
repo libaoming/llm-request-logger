@@ -1,0 +1,7 @@
+# raw captures contain metadata.user_id with device_id / session_id — never commit these
+cap/
+req-*.json
+*.log
+
+__pycache__/
+.DS_Store
