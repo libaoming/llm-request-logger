@@ -5,3 +5,5 @@ req-*.json
 
 __pycache__/
 .DS_Store
+prompts/
+pub/
