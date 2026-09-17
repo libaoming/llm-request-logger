@@ -22,8 +22,9 @@ Environment-injected sections (`# Environment`, `# auto memory`, `# claudeMd`,
 | `# Context management` | 559 | 559 | 559 | 559 | 559 | 559 | 561 | 1,915 |
 | **policy prose total** | **12,938** | **12,938** | **12,938** | **12,938** | **12,938** | **5,041** | **8,375** | **9,487** |
 
-All eight captures carry the same 25 tool definitions (~76–94KB of JSON, an order of magnitude
-larger than the prompt itself).
+All eight captures carry the same 25 tool definitions. That count is inflated: these runs did not set
+`ENABLE_TOOL_SEARCH=true`, so the CLI wrote every tool schema into the request. See the README section
+"The observer effect". The system prompt text is unaffected.
 
 ## Reading the table
 

@@ -1,51 +1,53 @@
-#!/usr/bin/env python3
-"""从抓到的请求体导出 system prompt 正文，剔除本机注入并做路径脱敏。
+"""导出可以公开的版本：剔除本机注入的节，抹掉路径、邮箱、设备和会话标识。"""
+import glob, os
 
-用法: export.py <capture_dir> <out_dir>
-"""
-import json, glob, os, re, sys
+from common import iter_sections, load, main_system_text, safe_name, scrub
+from report import to_markdown
 
-# 本机环境注入的整节，不属于官方 prompt，导出时整节剔除
+# 本机环境注入的整节，不属于厂商的提示词，导出时整节剔除
 DROP_SECTIONS = {"# auto memory", "# claudeMd"}
 
-SCRUB = [
-    (re.compile(r"/private/tmp/claude-\d+/[^\s`'\"]*"), "/tmp/workdir"),
-    (re.compile(r"/Users/[A-Za-z0-9._-]+"), "/Users/USER"),
-    (re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"), "user@example.com"),
-    (re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b"), "<uuid>"),
-    (re.compile(r"\b[0-9a-f]{32,}\b"), "<hash>"),
-]
+
+# 已知的厂商手写节。被剔除的节里如果自带一级标题（比如你的 CLAUDE.md 里写了 "# 我的笔记"），
+# 只按标题切会把后半截漏出来。所以剔除一节之后，一直剔到下一个已知的厂商标题为止，宁可多删。
+VENDOR_SECTIONS = {
+    "# System", "# Doing tasks", "# Executing actions with care", "# Using your tools", "# Tone and style",
+    "# Text output (does not apply to tool calls)", "# Harness", "# Memory", "# Delivering work",
+    "# Corrections", "# Communicating with the user", "# Context management", "# Environment",
+    "# Session-specific guidance",
+}
 
 
 def strip_sections(body):
-    parts = re.split(r"^(# .+)$", body, flags=re.M)
-    out = [parts[0]]
-    for head, text in zip(parts[1::2], parts[2::2]):
-        if head.strip() in DROP_SECTIONS:
-            continue
-        out.append(head + text)
+    out, dropping = [], False
+    for head, text in iter_sections(body):
+        name = head.strip() if head else None
+        if name in DROP_SECTIONS:
+            dropping = True
+        elif name in VENDOR_SECTIONS or name is None:
+            dropping = False
+        if not dropping:
+            out.append((head or "") + text)
     return "".join(out)
 
 
-def scrub(text):
-    for pat, rep in SCRUB:
-        text = pat.sub(rep, text)
-    return text
-
-
-def main(cap_dir, out_dir):
+def export_dir(cap_dir, out_dir, full=False):
+    """默认只导出 system 正文；full=True 时导出整份请求的可读版（同样脱敏）。"""
     os.makedirs(out_dir, exist_ok=True)
-    for f in sorted(glob.glob(os.path.join(cap_dir, "req-*.json"))):
-        model = os.path.basename(f)[4:-5]
-        d = json.load(open(f))
-        body = max((b.get("text", "") for b in d["system"]), key=len)
-        body = scrub(strip_sections(body))
-        path = os.path.join(out_dir, f"{model}.md")
-        with open(path, "w") as fh:
-            fh.write(body)
-        route = "new" if "# Harness" in body else "legacy"
-        print(f"{model:<30} {len(body):>7,} 字符  [{route}]  -> {path}")
-
-
-if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2])
+    written = []
+    for f in sorted(glob.glob(os.path.join(cap_dir, "*.json"))):
+        env = load(f)
+        req = env["request"]
+        if not isinstance(req, dict) or "system" not in req:
+            continue
+        if full:
+            text = to_markdown(env, do_scrub=True)
+            dest = os.path.join(out_dir, os.path.basename(f)[:-5] + ".md")
+        else:
+            text = scrub(strip_sections(main_system_text(req)))
+            dest = os.path.join(out_dir, f"{safe_name(req.get('model'))}.md")
+        with open(dest, "w") as fh:
+            fh.write(text)
+        written.append(dest)
+        print(f"{req.get('model', '?'):<30} {len(text):>8,} 字符  -> {dest}")
+    return written
